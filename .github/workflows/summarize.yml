@@ -6,7 +6,7 @@ on:
 jobs:
   summarize:
     runs-on: ubuntu-latest
-    if: contains(github.event.issue.labels.*.name, '本')
+    if: contains(github.event.issue.labels.*.name, '本') && github.event.sender.login == github.repository_owner
     permissions:
       contents: write
       issues: write
