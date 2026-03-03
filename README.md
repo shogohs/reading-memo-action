@@ -35,3 +35,10 @@ Repository secretsにSUMMARIZE_PATを登録。
 - 出力フォルダを変えたい → book-summary を好きな名前に
 - 温度を調整 → temperature: 0.0〜1.0の間で調整できます
 - 別のラベルで動かしたい → if: の条件を変更
+
+## ライセンス
+
+このリポジトリは **MIT License** で公開しています。  
+自由に複製・改変・再配布・商用利用OKです（著作権表示とライセンス文を残してください）。
+
+詳細は [LICENSE](LICENSE) をご覧ください。
