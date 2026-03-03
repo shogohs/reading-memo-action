@@ -1,0 +1,78 @@
+name: Summarize Issue
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, '本')
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate Summary
+        env:
+          GH_TOKEN: ${{ secrets.SUMMARIZE_PAT }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          # 1. Issueの情報をJSONで取得
+          ISSUE_URL="${{ github.event.issue.html_url }}"
+          ISSUE_DATA=$(gh issue view $ISSUE_NUMBER --json title,body,comments)
+
+          # 2. jqでAPIリクエストボディを安全に構築
+          SYSTEM_PROMPT="あなたは読書メモの整理役です。以下のルールに厳密に従ってください。
+          - メモの内容をそのまま整理・構造化すること。あなた自身の解釈・感想・補足は一切加えないこと。
+          - メモに含まれる引用（Markdownの > で記載）は引用としてそのまま残すこと。
+          - ページ番号（p.XX、XX頁など）が併記されている場合は必ず該当箇所に記載すること。
+          - 出力形式はMarkdownとし以下の構成にすること：
+            # 書籍タイトル
+            > Source: {IssueのURL}
+            ## 概要（メモ全体から読み取れる書籍の主題を簡潔に）
+            ## 読書メモ（章やテーマごとに整理。引用とページ番号を保持）
+            ## まとめ（メモから読み取れる要点の箇条書き）"
+          REQUEST_BODY=$(jq -n --arg system "$SYSTEM_PROMPT" --arg issue "$ISSUE_DATA" --arg url "$ISSUE_URL" '{
+            model: "gpt-4o",
+            temperature: 0.3,
+            messages: [
+              { role: "system", content: $system },
+              { role: "user", content: ("以下のJSONはGitHub Issueに記録された読書メモです。コメントを時系列順に読み取り、ルールに従ってまとめてください。IssueのURLは " + $url + " です。\n\n" + $issue) }
+            ]
+          }')
+
+          # 3. GitHub Models APIによる要約実行
+          curl -sf https://models.inference.ai.azure.com/chat/completions \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$REQUEST_BODY" | jq -e -r '.choices[0].message.content' > summary_result.md
+
+          # 4. 結果の検証（空ファイルや"null"のみの場合は失敗させる）
+          if [ ! -s summary_result.md ] || grep -qx 'null' summary_result.md; then
+            echo "::error::要約結果が空またはnullです"
+            exit 1
+          fi
+
+          # 5. book-summaryフォルダへの配置
+          mkdir -p book-summary
+          mv summary_result.md "book-summary/${ISSUE_NUMBER}.md"
+
+      - name: Commit and Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p book-summary
+          git add book-summary/
+          git commit -m "docs: summarize issue #${{ github.event.issue.number }}" || echo "No changes to commit"
+          git push
+
+      - name: Comment on Issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO_URL="${{ github.server_url }}/${{ github.repository }}"
+          FILE_URL="${REPO_URL}/blob/${{ github.ref_name }}/book-summary/${{ github.event.issue.number }}.md"
+          gh issue comment ${{ github.event.issue.number }} --body "📖 要約ファイルを作成しました: ${FILE_URL}"
